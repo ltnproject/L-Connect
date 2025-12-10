@@ -1,0 +1,1018 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>L-Connect</title>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
+import { getAuth, onAuthStateChanged, signOut, GoogleAuthProvider, signInWithPopup, GithubAuthProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-auth.js";
+import { getFirestore, collection, addDoc, query, where, orderBy, onSnapshot, updateDoc, doc, serverTimestamp, getDoc } from "https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyA4ovAvqWaKrcZoyhQAfluLFCIQkJTIM5M",
+  authDomain: "l-connect-ebd04.firebaseapp.com",
+  projectId: "l-connect-ebd04",
+  storageBucket: "l-connect-ebd04.firebasestorage.app",
+  messagingSenderId: "868153930778",
+  appId: "1:868153930778:web:8b258e74eff8a48da64da3",
+  measurementId: "G-8DBZQJC168"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const googleProvider = new GoogleAuthProvider();
+const githubProvider = new GithubAuthProvider();
+
+let currentUser = null;
+let view = 'inbox';
+let emails = [];
+let selectedEmail = null;
+let unreadCount = 0;
+
+// DOM elements
+const loginDiv = document.getElementById('loginDiv');
+const emailInput = document.getElementById('emailInput');
+const passwordInput = document.getElementById('passwordInput');
+const loginBtn = document.getElementById('loginBtn');
+const signupBtn = document.getElementById('signupBtn');
+const googleBtn = document.getElementById('googleBtn');
+const githubBtn = document.getElementById('githubBtn');
+const authError = document.getElementById('authError');
+
+const sidebar = document.getElementById('sidebar');
+const toggleSidebarBtn = document.getElementById('toggleSidebar');
+const inboxBtn = document.getElementById('inboxBtn');
+const sentBtn = document.getElementById('sentBtn');
+const trashBtn = document.getElementById('trashBtn');
+const composeBtn = document.getElementById('composeBtn');
+const logoutBtn = document.getElementById('logoutBtn');
+const userEmailSpan = document.getElementById('userEmail');
+const unreadBadge = document.getElementById('unreadBadge');
+
+const searchInput = document.getElementById('searchInput');
+const emailListDiv = document.getElementById('emailList');
+const emailViewDiv = document.getElementById('emailView');
+const composeDiv = document.getElementById('composeDiv');
+const composeTo = document.getElementById('composeTo');
+const composeSubject = document.getElementById('composeSubject');
+const composeBody = document.getElementById('composeBody');
+const sendBtn = document.getElementById('sendBtn');
+const cancelComposeBtn = document.getElementById('cancelComposeBtn');
+
+const backBtn = document.getElementById('backBtn');
+const emailSubjectView = document.getElementById('emailSubjectView');
+const emailFromView = document.getElementById('emailFromView');
+const emailToView = document.getElementById('emailToView');
+const emailTimeView = document.getElementById('emailTimeView');
+const emailBodyView = document.getElementById('emailBodyView');
+const deleteBtn = document.getElementById('deleteBtn');
+const replyBtn = document.getElementById('replyBtn');
+
+const loadingSpinner = document.getElementById('loadingSpinner');
+
+// Show/hide loading
+function showLoading() {
+  loadingSpinner.style.display = 'flex';
+}
+
+function hideLoading() {
+  loadingSpinner.style.display = 'none';
+}
+
+// Safe hide loading with timeout fallback
+function safeHideLoading() {
+  setTimeout(() => {
+    hideLoading();
+  }, 100);
+}
+
+// Auto-hide loading after 10 seconds as a safety measure
+let loadingTimeout;
+function showLoadingWithTimeout() {
+  showLoading();
+  clearTimeout(loadingTimeout);
+  loadingTimeout = setTimeout(() => {
+    hideLoading();
+  }, 10000);
+}
+
+function hideLoadingAndClearTimeout() {
+  hideLoading();
+  clearTimeout(loadingTimeout);
+}
+
+// Auth functions
+googleBtn.onclick = async()=>{
+  showLoadingWithTimeout();
+  try{
+    await signInWithPopup(auth, googleProvider);
+  }catch(e){
+    authError.textContent=e.message;
+    hideLoadingAndClearTimeout();
+  }
+}
+
+githubBtn.onclick = async()=>{
+  showLoadingWithTimeout();
+  try{
+    await signInWithPopup(auth, githubProvider);
+  }catch(e){
+    authError.textContent=e.message;
+    hideLoadingAndClearTimeout();
+  }
+}
+
+loginBtn.onclick=async()=>{
+  showLoadingWithTimeout();
+  try{
+    await signInWithEmailAndPassword(auth,emailInput.value,passwordInput.value);
+  }catch(e){
+    authError.textContent=e.message;
+    hideLoadingAndClearTimeout();
+  }
+}
+
+signupBtn.onclick=async()=>{
+  showLoadingWithTimeout();
+  try{
+    await createUserWithEmailAndPassword(auth,emailInput.value,passwordInput.value);
+  }catch(e){
+    authError.textContent=e.message;
+    hideLoadingAndClearTimeout();
+  }
+}
+
+logoutBtn.onclick=()=>{signOut(auth);};
+
+// Sidebar toggle
+toggleSidebarBtn.onclick=()=>{
+  sidebar.classList.toggle('open');
+}
+
+// Navigation buttons
+inboxBtn.onclick=()=>{
+  view='inbox';
+  selectedEmail=null;
+  loadEmails();
+  updateActiveButton();
+  closeSidebarOnMobile();
+}
+
+sentBtn.onclick=()=>{
+  view='sent';
+  selectedEmail=null;
+  loadEmails();
+  updateActiveButton();
+  closeSidebarOnMobile();
+}
+
+trashBtn.onclick=()=>{
+  view='trash';
+  selectedEmail=null;
+  loadEmails();
+  updateActiveButton();
+  closeSidebarOnMobile();
+}
+
+composeBtn.onclick=()=>{
+  composeDiv.style.display='block';
+  emailViewDiv.style.display='none';
+  emailListDiv.style.display='none';
+  document.querySelector('.search-container').style.display='none';
+  closeSidebarOnMobile();
+}
+
+function updateActiveButton() {
+  document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+  if(view === 'inbox') inboxBtn.classList.add('active');
+  else if(view === 'sent') sentBtn.classList.add('active');
+  else if(view === 'trash') trashBtn.classList.add('active');
+}
+
+function closeSidebarOnMobile() {
+  if(window.innerWidth <= 768) {
+    sidebar.classList.remove('open');
+  }
+}
+
+// Compose buttons
+cancelComposeBtn.onclick=()=>{
+  composeDiv.style.display='none';
+  emailListDiv.style.display='block';
+  document.querySelector('.search-container').style.display='block';
+  composeTo.value='';
+  composeSubject.value='';
+  composeBody.value='';
+}
+
+sendBtn.onclick=async()=>{
+  if(!composeTo.value||!composeSubject.value||!composeBody.value) {
+    alert('Please fill in all fields');
+    return;
+  }
+  
+  showLoading();
+  try {
+    await addDoc(collection(db,'emails'),{
+      from:currentUser.email,
+      to:composeTo.value,
+      subject:composeSubject.value,
+      body:composeBody.value,
+      timestamp:serverTimestamp(),
+      read:false,
+      deleted:false
+    });
+    
+    composeDiv.style.display='none';
+    emailListDiv.style.display='block';
+    document.querySelector('.search-container').style.display='block';
+    composeTo.value='';
+    composeSubject.value='';
+    composeBody.value='';
+    view='sent';
+    loadEmails();
+    updateActiveButton();
+  } catch(e) {
+    alert('Error sending email: ' + e.message);
+  }
+  hideLoading();
+}
+
+// Email view buttons
+backBtn.onclick=()=>{
+  selectedEmail=null;
+  emailViewDiv.style.display='none';
+  emailListDiv.style.display='block';
+  document.querySelector('.search-container').style.display='block';
+}
+
+deleteBtn.onclick=async()=>{
+  if(!selectedEmail)return;
+  if(!confirm('Move this email to trash?'))return;
+  
+  showLoading();
+  await updateDoc(doc(db,'emails',selectedEmail.id),{deleted:true});
+  selectedEmail=null;
+  emailViewDiv.style.display='none';
+  emailListDiv.style.display='block';
+  document.querySelector('.search-container').style.display='block';
+  loadEmails();
+  hideLoading();
+}
+
+replyBtn.onclick=()=>{
+  composeTo.value = selectedEmail.from;
+  composeSubject.value = 'Re: ' + selectedEmail.subject;
+  composeBody.value = '\n\n--- Original Message ---\nFrom: ' + selectedEmail.from + '\n\n' + selectedEmail.body;
+  emailViewDiv.style.display='none';
+  composeDiv.style.display='block';
+}
+
+searchInput.oninput=()=>{renderEmails();}
+
+// Auth state
+onAuthStateChanged(auth,user=>{
+  if(user){
+    currentUser=user;
+    loginDiv.style.display='none';
+    sidebar.style.display='flex';
+    toggleSidebarBtn.style.display='block';
+    userEmailSpan.textContent=user.email;
+    loadEmails();
+    updateActiveButton();
+  } else {
+    currentUser=null;
+    loginDiv.style.display='flex';
+    sidebar.style.display='none';
+    toggleSidebarBtn.style.display='none';
+    emailListDiv.innerHTML='';
+    emailViewDiv.style.display='none';
+    composeDiv.style.display='none';
+  }
+});
+
+// Load emails
+async function loadEmails(){
+  if(!currentUser)return;
+  
+  showLoading();
+  let q;
+  
+  if(view==='inbox') {
+    q=query(collection(db,'emails'),where('to','==',currentUser.email),where('deleted','==',false),orderBy('timestamp','desc'));
+  } else if(view==='sent') {
+    q=query(collection(db,'emails'),where('from','==',currentUser.email),where('deleted','==',false),orderBy('timestamp','desc'));
+  } else if(view==='trash') {
+    q=query(collection(db,'emails'),where('to','==',currentUser.email),where('deleted','==',true),orderBy('timestamp','desc'));
+  }
+  
+  onSnapshot(q,snapshot=>{
+    emails=snapshot.docs.map(doc=>({id:doc.id,...doc.data()}));
+    
+    // Calculate unread count
+    if(view === 'inbox') {
+      unreadCount = emails.filter(e => !e.read).length;
+      unreadBadge.textContent = unreadCount;
+      unreadBadge.style.display = unreadCount > 0 ? 'inline-block' : 'none';
+      
+      // Update page title
+      if(unreadCount > 0) {
+        document.title = `(${unreadCount}) L-Connect`;
+      } else {
+        document.title = 'L-Connect';
+      }
+    }
+    
+    renderEmails();
+    hideLoading();
+  });
+}
+
+function renderEmails(){
+  emailListDiv.innerHTML='';
+  const filtered=emails.filter(e=>
+    e.subject.toLowerCase().includes(searchInput.value.toLowerCase())||
+    e.from.toLowerCase().includes(searchInput.value.toLowerCase())||
+    e.body.toLowerCase().includes(searchInput.value.toLowerCase())
+  );
+  
+  if(filtered.length===0){
+    emailListDiv.innerHTML='<div class="empty-state"><svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg><p>No emails found</p></div>';
+    return;
+  }
+  
+  filtered.forEach(email=>{
+    const div=document.createElement('div');
+    div.className='emailItem' + (!email.read && view === 'inbox' ? ' unread' : '');
+    
+    const time = email.timestamp ? formatTime(new Date(email.timestamp.seconds*1000)) : '';
+    const preview = email.body.substring(0, 80) + (email.body.length > 80 ? '...' : '');
+    
+    div.innerHTML=`
+      <div class="email-header">
+        <span class="email-sender">${view==='sent'?email.to:email.from}</span>
+        <span class="email-time">${time}</span>
+      </div>
+      <div class="email-subject">${email.subject}</div>
+      <div class="email-preview">${preview}</div>
+    `;
+    
+    div.onclick=async()=>{
+      selectedEmail=email;
+      
+      // Mark as read
+      if(!email.read && view === 'inbox') {
+        await updateDoc(doc(db,'emails',email.id),{read:true});
+      }
+      
+      emailSubjectView.textContent=email.subject;
+      emailFromView.textContent=email.from;
+      emailToView.textContent=email.to;
+      emailTimeView.textContent=email.timestamp?new Date(email.timestamp.seconds*1000).toLocaleString():'';
+      emailBodyView.textContent=email.body;
+      emailViewDiv.style.display='block';
+      emailListDiv.style.display='none';
+      document.querySelector('.search-container').style.display='none';
+      
+      // Show/hide reply button
+      replyBtn.style.display = view === 'inbox' ? 'inline-block' : 'none';
+    };
+    
+    emailListDiv.appendChild(div);
+  });
+}
+
+function formatTime(date) {
+  const now = new Date();
+  const diff = now - date;
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  
+  if(hours < 1) return 'Just now';
+  if(hours < 24) return hours + 'h ago';
+  if(days < 7) return days + 'd ago';
+  return date.toLocaleDateString();
+}
+</script>
+<style>
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  overflow-x: hidden;
+}
+
+/* Loading Spinner */
+#loadingSpinner {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.7);
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+}
+
+.spinner {
+  width: 50px;
+  height: 50px;
+  border: 4px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Login */
+#loginDiv {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  padding: 20px;
+}
+
+#loginDiv h1 {
+  margin-bottom: 32px;
+  font-size: 2.5em;
+  text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+}
+
+#authError {
+  color: #ff6b6b;
+  margin-bottom: 16px;
+  background: rgba(255,107,107,0.2);
+  padding: 8px 16px;
+  border-radius: 6px;
+  min-height: 20px;
+}
+
+#loginDiv input {
+  padding: 14px 18px;
+  margin: 8px 0;
+  border-radius: 12px;
+  width: 300px;
+  max-width: 90vw;
+  border: none;
+  background: rgba(255,255,255,0.95);
+  font-size: 16px;
+  transition: all 0.3s;
+}
+
+#loginDiv input:focus {
+  outline: none;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+
+#loginDiv button {
+  padding: 14px;
+  width: 300px;
+  max-width: 90vw;
+  margin-top: 12px;
+  border: none;
+  border-radius: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s;
+  font-size: 16px;
+}
+
+#loginDiv button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+}
+
+#loginBtn, #signupBtn {
+  background: #fff;
+  color: #667eea;
+}
+
+#googleBtn {
+  background: #db4437;
+  color: white;
+}
+
+#githubBtn {
+  background: #333;
+  color: white;
+}
+
+/* Sidebar */
+#sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 260px;
+  height: 100vh;
+  padding: 24px;
+  background: rgba(255,255,255,0.12);
+  backdrop-filter: blur(20px);
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+  transition: transform 0.3s ease;
+  box-shadow: 2px 0 16px rgba(0,0,0,0.1);
+}
+
+#sidebar p {
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.2);
+  word-break: break-all;
+}
+
+#sidebar button {
+  width: 100%;
+  padding: 14px;
+  margin: 6px 0;
+  background: rgba(255,255,255,0.15);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.3s;
+  color: #fff;
+  font-weight: 500;
+  text-align: left;
+  position: relative;
+}
+
+#sidebar button:hover {
+  background: rgba(255,255,255,0.25);
+  transform: translateX(4px);
+}
+
+#sidebar button.active {
+  background: rgba(255,255,255,0.3);
+  font-weight: 600;
+}
+
+#sidebar button.nav-btn {
+  font-size: 15px;
+}
+
+#composeBtn {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  margin-bottom: 16px;
+  font-weight: 600;
+}
+
+#logoutBtn {
+  margin-top: auto;
+  background: rgba(255,107,107,0.3);
+}
+
+#unreadBadge {
+  display: none;
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: #ff6b6b;
+  color: white;
+  border-radius: 12px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#toggleSidebar {
+  display: none;
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 101;
+  padding: 12px 16px;
+  background: rgba(255,255,255,0.2);
+  backdrop-filter: blur(10px);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 20px;
+  color: white;
+  transition: all 0.3s;
+}
+
+#toggleSidebar:hover {
+  background: rgba(255,255,255,0.3);
+}
+
+/* Main Content */
+.search-container {
+  margin-left: 280px;
+  padding: 20px;
+}
+
+#searchInput {
+  width: 100%;
+  max-width: 600px;
+  padding: 14px 20px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.15);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,0.2);
+  color: #fff;
+  font-size: 16px;
+  transition: all 0.3s;
+}
+
+#searchInput:focus {
+  outline: none;
+  background: rgba(255,255,255,0.2);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+#searchInput::placeholder {
+  color: rgba(255,255,255,0.6);
+}
+
+#emailList {
+  margin-left: 280px;
+  padding: 0 20px 20px;
+  max-width: 900px;
+}
+
+.emailItem {
+  padding: 18px;
+  background: rgba(255,255,255,0.12);
+  backdrop-filter: blur(10px);
+  margin-bottom: 10px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+.emailItem:hover {
+  background: rgba(255,255,255,0.2);
+  transform: translateX(4px);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+}
+
+.emailItem.unread {
+  background: rgba(255,255,255,0.18);
+  border-left: 4px solid #ffd93d;
+}
+
+.email-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.email-sender {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.email-time {
+  font-size: 13px;
+  color: rgba(255,255,255,0.7);
+}
+
+.email-subject {
+  font-weight: 500;
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+
+.email-preview {
+  font-size: 13px;
+  color: rgba(255,255,255,0.75);
+  line-height: 1.4;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: rgba(255,255,255,0.6);
+}
+
+.empty-state svg {
+  margin-bottom: 16px;
+  opacity: 0.4;
+}
+
+.empty-state p {
+  font-size: 18px;
+}
+
+/* Email View */
+#emailView, #composeDiv {
+  display: none;
+  margin-left: 280px;
+  margin-right: 20px;
+  padding: 28px;
+  background: rgba(255,255,255,0.12);
+  backdrop-filter: blur(20px);
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.2);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+  max-width: 900px;
+}
+
+#emailView h3 {
+  margin: 20px 0;
+  font-size: 24px;
+}
+
+#emailView p {
+  margin: 12px 0;
+  line-height: 1.6;
+}
+
+#emailBodyView {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(255,255,255,0.2);
+  white-space: pre-wrap;
+  line-height: 1.8;
+}
+
+/* Compose */
+#composeDiv input, #composeDiv textarea {
+  width: 100%;
+  padding: 14px;
+  margin-bottom: 14px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.2);
+  color: #fff;
+  font-size: 15px;
+  font-family: inherit;
+  transition: all 0.3s;
+}
+
+.info-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: rgba(255, 215, 0, 0.2);
+  border: 1px solid rgba(255, 215, 0, 0.4);
+  border-radius: 10px;
+  margin-bottom: 16px;
+  color: #ffd700;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.info-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+#composeDiv input:focus, #composeDiv textarea:focus {
+  outline: none;
+  background: rgba(255,255,255,0.2);
+  border-color: rgba(255,255,255,0.4);
+}
+
+#composeDiv textarea {
+  resize: vertical;
+  min-height: 200px;
+}
+
+button {
+  padding: 12px 24px;
+  margin-right: 10px;
+  background: rgba(255,255,255,0.2);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.3s;
+  font-weight: 600;
+  font-size: 15px;
+}
+
+button:hover {
+  background: rgba(255,255,255,0.3);
+  transform: translateY(-2px);
+}
+
+#sendBtn, #replyBtn {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+}
+
+#deleteBtn {
+  background: rgba(255,107,107,0.4);
+}
+
+::placeholder {
+  color: rgba(255,255,255,0.5);
+}
+
+/* Footer */
+#footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 16px 20px;
+  background: rgba(0,0,0,0.3);
+  backdrop-filter: blur(20px);
+  border-top: 1px solid rgba(255,255,255,0.15);
+  z-index: 50;
+  box-shadow: 0 -4px 12px rgba(0,0,0,0.2);
+}
+
+.footer-content {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.footer-link {
+  color: #fff;
+  text-decoration: none;
+  padding: 8px 16px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 8px;
+  transition: all 0.3s;
+  font-weight: 500;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.footer-link:hover {
+  background: rgba(255,255,255,0.2);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+
+.footer-divider {
+  width: 1px;
+  height: 20px;
+  background: rgba(255,255,255,0.2);
+}
+
+.copyright {
+  color: rgba(255,255,255,0.7);
+  font-size: 13px;
+  margin: 0;
+}
+
+/* Add padding to body content to account for fixed footer */
+body {
+  padding-bottom: 70px;
+}
+
+/* Mobile */
+@media(max-width: 768px) {
+  #sidebar {
+    transform: translateX(-100%);
+  }
+  
+  #sidebar.open {
+    transform: translateX(0);
+  }
+  
+  #toggleSidebar {
+    display: block;
+  }
+  
+  .search-container, #emailList, #emailView, #composeDiv {
+    margin-left: 0;
+    margin-right: 0;
+  }
+  
+  #emailView, #composeDiv {
+    margin: 10px;
+  }
+  
+  .footer-content {
+    gap: 10px;
+    font-size: 12px;
+  }
+  
+  .footer-link {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+  
+  .footer-divider {
+    display: none;
+  }
+  
+  .copyright {
+    width: 100%;
+    text-align: center;
+    font-size: 11px;
+  }
+}
+</style>
+</head>
+<body>
+
+<!-- Loading Spinner -->
+<div id="loadingSpinner">
+  <div class="spinner"></div>
+</div>
+
+<!-- Login -->
+<div id="loginDiv">
+  <h1>✉️ L-Connect</h1>
+  <div id="authError"></div>
+  <input type="email" id="emailInput" placeholder="Email address">
+  <input type="password" id="passwordInput" placeholder="Password">
+  <button id="loginBtn">Login</button>
+  <button id="signupBtn">Sign Up</button>
+  <button id="googleBtn">🔍 Sign in with Google</button>
+  <button id="githubBtn">⚡ Sign in with GitHub</button>
+</div>
+
+<!-- Sidebar Toggle -->
+<button id="toggleSidebar">☰</button>
+
+<!-- Sidebar -->
+<div id="sidebar">
+  <p><b>User:</b><br><span id="userEmail"></span></p>
+  <button id="inboxBtn" class="nav-btn">
+    📥 Inbox
+    <span id="unreadBadge">0</span>
+  </button>
+  <button id="sentBtn" class="nav-btn">📤 Sent</button>
+  <button id="trashBtn" class="nav-btn">🗑️ Trash</button>
+  <button id="composeBtn">✏️ Compose</button>
+  <button id="logoutBtn">🚪 Logout</button>
+</div>
+
+<!-- Search -->
+<div class="search-container">
+  <input type="text" id="searchInput" placeholder="🔍 Search emails...">
+</div>
+
+<!-- Email List -->
+<div id="emailList"></div>
+
+<!-- Email View -->
+<div id="emailView">
+  <button id="backBtn">← Back</button>
+  <button id="replyBtn">↩️ Reply</button>
+  <button id="deleteBtn">🗑️ Delete</button>
+  <h3 id="emailSubjectView"></h3>
+  <p><b>From:</b> <span id="emailFromView"></span></p>
+  <p><b>To:</b> <span id="emailToView"></span></p>
+  <p><b>Time:</b> <span id="emailTimeView"></span></p>
+  <div id="emailBodyView"></div>
+</div>
+
+<!-- Compose -->
+<div id="composeDiv">
+  <h2 style="margin-bottom: 20px;">✏️ Compose Email</h2>
+  <div class="info-note">
+    <span class="info-icon">ℹ️</span>
+    <span>Note: You can only send emails to L-Connect users</span>
+  </div>
+  <input type="email" id="composeTo" placeholder="To: recipient@example.com">
+  <input type="text" id="composeSubject" placeholder="Subject">
+  <textarea id="composeBody" placeholder="Write your message here..."></textarea>
+  <button id="sendBtn">📧 Send</button>
+  <button id="cancelComposeBtn">Cancel</button>
+</div>
+
+<!-- Footer -->
+<footer id="footer">
+  <div class="footer-content">
+    <a href="https://ltnproject.github.io/dashboard/" class="footer-link">
+      🏠 Dashboard
+    </a>
+    <div class="footer-divider"></div>
+    <a href="mailto:ltnprojectbyjacob@gmail.com" class="footer-link">
+      📧 Contact Us
+    </a>
+    <div class="footer-divider"></div>
+    <a href="https://www.youtube.com/@LtnRBLX" target="_blank" class="footer-link">
+      ▶️ YouTube
+    </a>
+    <div class="footer-divider"></div>
+    <p class="copyright">© 2025 Ltn Project by Jacob</p>
+  </div>
+</footer>
+
+</body>
+</html>
