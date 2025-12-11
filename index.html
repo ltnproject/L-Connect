@@ -156,6 +156,9 @@ toggleSidebarBtn.onclick=()=>{
 inboxBtn.onclick=()=>{
   view='inbox';
   selectedEmail=null;
+  emailViewDiv.style.display='none';
+  emailListDiv.style.display='block';
+  document.querySelector('.search-container').style.display='block';
   loadEmails();
   updateActiveButton();
   closeSidebarOnMobile();
@@ -164,6 +167,9 @@ inboxBtn.onclick=()=>{
 sentBtn.onclick=()=>{
   view='sent';
   selectedEmail=null;
+  emailViewDiv.style.display='none';
+  emailListDiv.style.display='block';
+  document.querySelector('.search-container').style.display='block';
   loadEmails();
   updateActiveButton();
   closeSidebarOnMobile();
@@ -172,6 +178,9 @@ sentBtn.onclick=()=>{
 trashBtn.onclick=()=>{
   view='trash';
   selectedEmail=null;
+  emailViewDiv.style.display='none';
+  emailListDiv.style.display='block';
+  document.querySelector('.search-container').style.display='block';
   loadEmails();
   updateActiveButton();
   closeSidebarOnMobile();
@@ -214,7 +223,7 @@ sendBtn.onclick=async()=>{
     return;
   }
   
-  showLoading();
+  showLoadingWithTimeout();
   try {
     await addDoc(collection(db,'emails'),{
       from:currentUser.email,
@@ -233,12 +242,13 @@ sendBtn.onclick=async()=>{
     composeSubject.value='';
     composeBody.value='';
     view='sent';
-    loadEmails();
     updateActiveButton();
+    loadEmails();
+    hideLoadingAndClearTimeout();
   } catch(e) {
     alert('Error sending email: ' + e.message);
+    hideLoadingAndClearTimeout();
   }
-  hideLoading();
 }
 
 // Email view buttons
@@ -253,14 +263,19 @@ deleteBtn.onclick=async()=>{
   if(!selectedEmail)return;
   if(!confirm('Move this email to trash?'))return;
   
-  showLoading();
-  await updateDoc(doc(db,'emails',selectedEmail.id),{deleted:true});
-  selectedEmail=null;
-  emailViewDiv.style.display='none';
-  emailListDiv.style.display='block';
-  document.querySelector('.search-container').style.display='block';
-  loadEmails();
-  hideLoading();
+  showLoadingWithTimeout();
+  try {
+    await updateDoc(doc(db,'emails',selectedEmail.id),{deleted:true});
+    selectedEmail=null;
+    emailViewDiv.style.display='none';
+    emailListDiv.style.display='block';
+    document.querySelector('.search-container').style.display='block';
+    loadEmails();
+    hideLoadingAndClearTimeout();
+  } catch(e) {
+    alert('Error deleting email: ' + e.message);
+    hideLoadingAndClearTimeout();
+  }
 }
 
 replyBtn.onclick=()=>{
@@ -283,6 +298,7 @@ onAuthStateChanged(auth,user=>{
     userEmailSpan.textContent=user.email;
     loadEmails();
     updateActiveButton();
+    setTimeout(() => hideLoading(), 300);
   } else {
     currentUser=null;
     loginDiv.style.display='flex';
@@ -291,14 +307,21 @@ onAuthStateChanged(auth,user=>{
     emailListDiv.innerHTML='';
     emailViewDiv.style.display='none';
     composeDiv.style.display='none';
+    setTimeout(() => hideLoading(), 300);
   }
 });
 
 // Load emails
+let unsubscribeSnapshot = null;
+
 async function loadEmails(){
-  if(!currentUser)return;
+  if(!currentUser) return;
   
-  showLoading();
+  // Unsubscribe from previous listener
+  if(unsubscribeSnapshot) {
+    unsubscribeSnapshot();
+  }
+  
   let q;
   
   if(view==='inbox') {
@@ -309,8 +332,8 @@ async function loadEmails(){
     q=query(collection(db,'emails'),where('to','==',currentUser.email),where('deleted','==',true),orderBy('timestamp','desc'));
   }
   
-  onSnapshot(q,snapshot=>{
-    emails=snapshot.docs.map(doc=>({id:doc.id,...doc.data()}));
+  unsubscribeSnapshot = onSnapshot(q, snapshot => {
+    emails = snapshot.docs.map(doc=>({id:doc.id,...doc.data()}));
     
     // Calculate unread count
     if(view === 'inbox') {
@@ -327,7 +350,11 @@ async function loadEmails(){
     }
     
     renderEmails();
-    hideLoading();
+  }, error => {
+    console.error('Error loading emails:', error);
+    if(error.code === 'failed-precondition') {
+      alert('Database index required. Please check console for index creation link.');
+    }
   });
 }
 
