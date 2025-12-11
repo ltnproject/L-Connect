@@ -1030,6 +1030,120 @@ body {
     padding-bottom: 350px;
   }
 }
+/* Tablet */
+@media(max-width: 1024px) {
+  #sidebar {
+    width: 220px;
+  }
+  
+  .search-container, #emailList, #emailView, #composeDiv {
+    margin-left: 240px;
+  }
+}
+
+/* Desktop - Show sidebar by default */
+@media(min-width: 769px) {
+  #sidebar {
+    display: flex !important;
+  }
+  
+  #toggleSidebar {
+    display: none !important;
+  }
+}
+
+/* Mobile */
+@media(max-width: 768px) {
+  #sidebar {
+    transform: translateX(-100%);
+    width: 280px;
+  }
+  
+  #sidebar.open {
+    transform: translateX(0);
+    display: flex !important;
+  }
+  
+  #toggleSidebar {
+    display: block;
+  }
+  
+  .search-container, #emailList, #emailView, #composeDiv {
+    margin-left: 0;
+    margin-right: 0;
+  }
+  
+  #emailView, #composeDiv {
+    margin: 10px;
+  }
+  
+  .search-container {
+    padding-top: 60px;
+  }
+  
+  .footer-content {
+    flex-direction: column;
+    gap: 20px;
+    align-items: center;
+  }
+  
+  .footer-section {
+    min-width: auto;
+    width: 100%;
+    max-width: 300px;
+    text-align: center;
+    align-items: center;
+  }
+  
+  .footer-title {
+    font-size: 18px;
+  }
+  
+  .footer-link {
+    font-size: 13px;
+  }
+  
+  body {
+    padding-bottom: 350px;
+  }
+}
+
+/* Small Mobile */
+@media(max-width: 480px) {
+  #loginDiv h1 {
+    font-size: 2em;
+  }
+  
+  #loginDiv input,
+  #loginDiv button {
+    width: 280px;
+  }
+  
+  #searchInput {
+    font-size: 14px;
+  }
+  
+  .emailItem {
+    padding: 14px;
+  }
+  
+  .email-sender {
+    font-size: 14px;
+  }
+  
+  .email-time {
+    font-size: 12px;
+  }
+  
+  #emailView h3 {
+    font-size: 20px;
+  }
+  
+  button {
+    padding: 10px 18px;
+    font-size: 14px;
+  }
+}
 </style>
 </head>
 <body>
