@@ -324,38 +324,61 @@ async function loadEmails(){
   
   let q;
   
-  if(view==='inbox') {
-    q=query(collection(db,'emails'),where('to','==',currentUser.email),where('deleted','==',false),orderBy('timestamp','desc'));
-  } else if(view==='sent') {
-    q=query(collection(db,'emails'),where('from','==',currentUser.email),where('deleted','==',false),orderBy('timestamp','desc'));
-  } else if(view==='trash') {
-    q=query(collection(db,'emails'),where('to','==',currentUser.email),where('deleted','==',true),orderBy('timestamp','desc'));
-  }
-  
-  unsubscribeSnapshot = onSnapshot(q, snapshot => {
-    emails = snapshot.docs.map(doc=>({id:doc.id,...doc.data()}));
+  try {
+    if(view==='inbox') {
+      // Simplified query - just get emails to user
+      q=query(collection(db,'emails'),where('to','==',currentUser.email));
+    } else if(view==='sent') {
+      q=query(collection(db,'emails'),where('from','==',currentUser.email));
+    } else if(view==='trash') {
+      // For trash, get all emails to user
+      q=query(collection(db,'emails'),where('to','==',currentUser.email));
+    }
     
-    // Calculate unread count
-    if(view === 'inbox') {
-      unreadCount = emails.filter(e => !e.read).length;
-      unreadBadge.textContent = unreadCount;
-      unreadBadge.style.display = unreadCount > 0 ? 'inline-block' : 'none';
+    unsubscribeSnapshot = onSnapshot(q, snapshot => {
+      let allEmails = snapshot.docs.map(doc=>({id:doc.id,...doc.data()}));
       
-      // Update page title
-      if(unreadCount > 0) {
-        document.title = `(${unreadCount}) L-Connect`;
-      } else {
-        document.title = 'L-Connect';
+      // Client-side filtering and sorting
+      if(view === 'inbox') {
+        emails = allEmails.filter(e => !e.deleted);
+      } else if(view === 'sent') {
+        emails = allEmails.filter(e => !e.deleted);
+      } else if(view === 'trash') {
+        emails = allEmails.filter(e => e.deleted);
       }
-    }
-    
-    renderEmails();
-  }, error => {
-    console.error('Error loading emails:', error);
-    if(error.code === 'failed-precondition') {
-      alert('Database index required. Please check console for index creation link.');
-    }
-  });
+      
+      // Sort by timestamp (newest first)
+      emails.sort((a, b) => {
+        const timeA = a.timestamp?.seconds || 0;
+        const timeB = b.timestamp?.seconds || 0;
+        return timeB - timeA;
+      });
+      
+      // Calculate unread count
+      if(view === 'inbox') {
+        unreadCount = emails.filter(e => !e.read).length;
+        unreadBadge.textContent = unreadCount;
+        unreadBadge.style.display = unreadCount > 0 ? 'inline-block' : 'none';
+        
+        // Update page title
+        if(unreadCount > 0) {
+          document.title = `(${unreadCount}) L-Connect`;
+        } else {
+          document.title = 'L-Connect';
+        }
+      }
+      
+      renderEmails();
+    }, error => {
+      console.error('Error loading emails:', error);
+      // Don't show alert on first load, just log it
+      if(emails.length === 0) {
+        emailListDiv.innerHTML = '<div class="empty-state"><p>Unable to load emails. Please refresh.</p></div>';
+      }
+    });
+  } catch(error) {
+    console.error('Error setting up email listener:', error);
+  }
 }
 
 function renderEmails(){
